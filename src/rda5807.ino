@@ -75,10 +75,10 @@ void RDA5807_Reset()
 void RDA5807_PowerOn()
 {
   RDA5807_Reg[3]=RDA5807_Reg[3] | 0x0010;   // Enable Tuning
-  RDA5807_Reg[2]=RDA5807_Reg[2] | 0x0002;   // Enable SoftReset
+ // RDA5807_Reg[2]=RDA5807_Reg[2] | 0x0002;   // Enable SoftReset
   RDA5807_Reg[2]=RDA5807_Reg[2] | 0x0001;   // Enable PowerOn
   RDA5807_Write();
-  RDA5807_Reg[2]=RDA5807_Reg[2] & 0xFFFD;   // Disable SoftReset //FFFB
+  //RDA5807_Reg[2]=RDA5807_Reg[2] & 0xFFFD;   // Disable SoftReset //FFFB
   RDA5807_Reg[3]=RDA5807_Reg[3] & 0xFFEF;  // Disable Tuning
 }
 

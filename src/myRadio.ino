@@ -42,7 +42,7 @@ const char bandspace[]  = {0, 0, 0, 3,};
 
 byte preset = 0; // US/Europe
 
-float  freqIni = 104.30;           // Startfrequenz (Landeswelle)
+float  freqIni = 89.00;           // Startfrequenz 
 float  freqAct;
 
 char    volAct = 7;              // Lautstaerke(Volume)
@@ -69,15 +69,16 @@ unsigned int    RDA5807_Reg[32];
 
 
 void setup() {
+   Wire.begin();                           // Intialisierung I2C-Bus(2 Wire)
   gb.begin();
   //Serial.begin(9600);                     // Serial Config
   gb.titleScreen(F("My Radio"));
-  Wire.begin();                           // Intialisierung I2C-Bus(2 Wire)
+ 
   delay(200);
   RDA5807_Reset();
-  delay(200);
+  delay(100);
   RDA5807_PowerOn();
-  delay(200);
+  delay(600);
   freqAct = freqIni;
   RDA5807_setFreq(freqAct);
   gb.battery.show = true;
@@ -104,7 +105,7 @@ void loop() {
       RDA5807_Reset();
       delay(200);
       RDA5807_PowerOn();
-      delay(200);
+      delay(600);
       RDA5807_setFreq(freqAct);
     }
     if (gb.buttons.repeat(BTN_A, 4)) {
