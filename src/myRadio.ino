@@ -82,6 +82,7 @@ void setup() {
   freqAct = freqIni;
   RDA5807_setFreq(freqAct);
   gb.battery.show = true;
+  gb.display.textWrap = true;
 }
 
 void loop() {
