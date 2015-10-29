@@ -3,6 +3,7 @@
 #include <Wire.h>
 #include "Bitmaps.h"
 #include "pty.h"
+#include <petit_fatfs.h>
 
 #define SEARCH_UP 1
 #define SEARCH_DOWN 2
@@ -11,15 +12,28 @@
 #define STEREO true
 #define RDA5807SEQ 0x10
 #define RDA5807RAN 0x11
+#define TMCDURATION 100 //100 Frames - 5 seconds
 
 Gamebuino gb;
 
 extern const byte font3x5[]; //a small but efficient font (default)
 extern const byte font5x7[]; //a large, comfy font
 
-String rdsCur  = "1234567890123456789012345678901234567890123456789012345678901234";
+//TMC-stuff
+byte fatResult;
+bool eventListFound = false;
+char textBuffer[64];
+word result;
+int  ldverr;
+unsigned int curEvent = 0;
+unsigned int lastEvent = 0;
+char TMCData[64];
+byte TMCDuration = 0;
+
+//RDS
+char rdsCur[64] = "12345678901234567890123456789012345678901234567890123456789013\0";
 char rdsFlag = ' ';  //Group 2A, Block2, Bit4
-String rdsLast = "no data available";
+char rdsLast[64];
 String rdsProg = "unknown";
 char actPTY = 0;
 String rdsClock = "hh:mm";
@@ -29,7 +43,8 @@ bool trafficAva = false;
 bool music = false;
 bool hasRDS = false;
 char searchMode = SEARCH_NONE;
-String rdsAF = "             ";
+//String rdsAF = "             ";
+
 
 // mapping band -> frequencies US/EUR JAP    World  EastEUR
 float freqMin[4]  = {87.005, 76.005, 76.005, 65.005,};
@@ -42,7 +57,6 @@ const char bandspace[]  = {0, 0, 0, 3,};
 
 byte preset = 0; // US/Europe
 
-float  freqIni = 89.00;           // Startfrequenz 
 float  freqAct;
 
 char    volAct = 7;              // Lautstaerke(Volume)
@@ -50,36 +64,45 @@ byte    rssiLevel = 0;              // Signal-Level
 //int    i_ret = 0;
 
 unsigned int rdsData[32];
+unsigned int oldPI = 0x0000;
+
+
+
 
 //boolean b_debug=false;
 
 unsigned int    RDA5807_Default[10] = {
   0x0758,  // 00 defaultid
-  0x0000,  // 01 not used
-  0xD009,  // 02 DHIZ,DMUTE,BASS, POWERUPENABLE,RDS
-  0x0000,  // 03
-  0x0200,//0x1400,  // 04 DE ? SOFTMUTE
-  0x84DF,  // 05 INT_MODE,SEEKTH=0110,????, Volume=15
-  0x4000,  // 06 OPENMODE=01
-  0x0000,  // 07 unused ?
-  0x0000,  // 08 unused ?
-  0x0000   // 09 unused ?
+  0x0000,  // 01
+  0xD009,  // 02 NO_HI_IMPEDANCE, NO_MUTE, NO_MONO, BASS=1, RDS=1, RESET=0, POWERUPENABLE=1
+  0x0000,  // 03 Channel/Tuning etc. will be set later
+  0x0200,  // 04 SOFTMUTE=1
+  0x84DF,  // 05 INT_MODE=1,SEEKTHRESHOLD=0110 (not used), Volume=15
+  0x4000,  // 06 OPENMODE=01 - statusregisters (>0x09) are readonly
+  0x0000,  // 07
+  0x0000,  // 08
+  0x0000   // 09
 };
 unsigned int    RDA5807_Reg[32];
 
 
+
 void setup() {
-   Wire.begin();                           // Intialisierung I2C-Bus(2 Wire)
+  Wire.begin();                           // Intialisierung I2C-Bus(2 Wire)
   gb.begin();
-  //Serial.begin(9600);                     // Serial Config
+  PFFS.begin(10, rx, tx); // initialize petit_fatfs
   gb.titleScreen(F("My Radio"));
- 
+  if (!pf_open("EVENTS.DAT")) {
+    eventListFound = true ;
+  } else {
+    gb.sound.playCancel();
+  }
   delay(200);
   RDA5807_Reset();
   delay(100);
   RDA5807_PowerOn();
   delay(600);
-  freqAct = freqIni;
+  freqAct = 91.50;           // Startfrequenz
   RDA5807_setFreq(freqAct);
   gb.battery.show = true;
   gb.display.textWrap = true;
@@ -128,7 +151,6 @@ void loop() {
       }
       RDA5807_setFreq(freqAct);
       delay(100);
-
     }
     gb.display.cursorX = 7;
     gb.display.cursorY = 0;
@@ -137,37 +159,44 @@ void loop() {
 
     if (mode) gb.display.drawBitmap(0, 0, stereo);
     gb.display.drawBitmap(45, 0, vols[volAct]);
+    
     gb.display.cursorX = 60;
     gb.display.cursorY = 0;
     gb.display.print(rdsClock);
+    
     gb.display.cursorX = 0;
     gb.display.cursorY = 15;
     gb.display.setFont(font5x7);
     gb.display.print(rdsProg);
     gb.display.setFont(font3x5);
+    
     gb.display.cursorX = 0;
-    gb.display.cursorY = 30;
-    gb.display.print(rdsLast);
-    // gb.display.print(rdsCur);
-
+    gb.display.cursorY = 25;
+    if (TMCDuration > 0) {
+      TMCDuration--;
+      gb.display.print(TMCData);
+    } else {
+      gb.display.println(rdsLast);
+    }
+    
     gb.display.cursorX = 0;
     gb.display.cursorY = 6;
-    //music always announced
+    //music seems always announced
     if (music) {
       gb.display.print(F("\16 "));
     } else {
       gb.display.print(F("  "));
     }
-    //   if (trafficAva){gb.display.print("TA ");}
+    //currently spoken traffic program
     if (trafficOn) {
       gb.display.print(F("TP "));
     }
+    //program type, mostly pop announced in tests with local radio stations
     if (actPTY < 16) {
       strcpy_P(buffer, (char*)pgm_read_word(&(PTY[actPTY])));
       gb.display.print(buffer);
     }
-   //  gb.display.print(String(RDA5807_Reg[2],HEX));
-
+    //signal level
     if (rssiLevel < 27) {
       gb.display.drawBitmap(54, 0, rssi[0]);
     } else if (rssiLevel > 35) {
@@ -185,4 +214,14 @@ void loop() {
       RDA5807_RDS();
     }
   }
+}
+byte rx() { // needed by petit_fatfs
+  SPDR = 0xFF;
+  loop_until_bit_is_set(SPSR, SPIF);
+  return SPDR;
+}
+
+void tx(byte d) { // needed by petit_fatfs
+  SPDR = d;
+  loop_until_bit_is_set(SPSR, SPIF);
 }
